@@ -2,14 +2,14 @@
 
 pthread_mutex_t imutex = PTHREAD_MUTEX_INITIALIZER;
 
-CMemPool* CMemPool::pInstance = NULL;
+CMemPool* CMemPool::instance_ = NULL;
 unsigned int CMemPool::psize = 4; //bytes that reserved to record pointer size
 size_t CMemPool::mem_limit = 0; //not use now
 size_t CMemPool::mem_malloced = 0; //record how many bytes we have malloced
 
 CMemPool::CMemPool() {
   pthread_mutex_init(&slabs_lock, NULL);
-  slabsInit(0, 2.0, 8);
+  init_slabs(0, 2.0, 8);
 }
 
 CMemPool::~CMemPool() {
@@ -31,17 +31,17 @@ CMemPool::~CMemPool() {
   }
 }
 
-CMemPool& CMemPool::Instance() {
-  if (!pInstance) { //Double-Checked Locking
+CMemPool& CMemPool::get_instance() {
+  if (!instance_) { //Double-Checked Locking
     pthread_mutex_lock(&imutex);
-    if (!pInstance)
-      pInstance = new CMemPool;
+    if (!instance_)
+      instance_ = new CMemPool;
     pthread_mutex_unlock(&imutex);
   }
-  return *pInstance;
+  return *instance_;
 }
 
-void CMemPool::slabsInit(const size_t limit, const double factor,
+void CMemPool::init_slabs(const size_t limit, const double factor,
     const size_t start_size) {
 
   int i = POWER_SMALLEST - 1;
@@ -69,7 +69,7 @@ void CMemPool::slabsInit(const size_t limit, const double factor,
   slabclass[power_largest].chunks_num = 1; //but size<POWER_BLOCK
 }
 
-unsigned int CMemPool::getSlabId(const size_t size) const {
+unsigned int CMemPool::get_slab_id(const size_t size) const {
   int res = POWER_SMALLEST;
 
   if (size == 0)
@@ -80,7 +80,7 @@ unsigned int CMemPool::getSlabId(const size_t size) const {
   return res;
 }
 
-int CMemPool::growSlabList(const unsigned int id) {
+int CMemPool::grow_slab_list(const unsigned int id) {
   slabclass_t *p = &slabclass[id];
   if (p->slabs_curr == p->slab_list_size) {
     size_t new_size = (p->slab_list_size != 0) ? p->slab_list_size * 2 : 16; //TODO maybe not 16
@@ -93,15 +93,15 @@ int CMemPool::growSlabList(const unsigned int id) {
   return 1;
 }
 
-int CMemPool::newSlab(const unsigned int id) {
+int CMemPool::new_slab(const unsigned int id) {
   slabclass_t *p = &slabclass[id];
   int len = p->vsize * p->chunks_num;
   char *ptr;
 
   if ((mem_limit && mem_malloced + len > mem_limit && p->slabs_curr > 0)
       || //TODO
-      (growSlabList(id) == 0)
-      || ((ptr = (char*) memoryAllocate((size_t) len)) == 0)) {
+      (grow_slab_list(id) == 0)
+      || ((ptr = (char*) allocate_memory((size_t) len)) == 0)) {
     return 0;
   }
 
@@ -115,10 +115,10 @@ int CMemPool::newSlab(const unsigned int id) {
   return 1;
 }
 
-void* CMemPool::doSlabsAlloc(const size_t size) {
+void* CMemPool::do_slabs_alloc(const size_t size) {
   slabclass_t *p;
   void *ret = NULL;
-  unsigned int id = getSlabId(size);
+  unsigned int id = get_slab_id(size);
   if (id < POWER_SMALLEST || id > power_largest) {
     return NULL;
   }
@@ -127,7 +127,7 @@ void* CMemPool::doSlabsAlloc(const size_t size) {
 
   /* fail unless we have space at the end of a recently allocated page,
    we have something on our freelist, or we could allocate a new page */
-  if (!(p->end_page_ptr != 0 || p->fc_curr != 0 || newSlab(id) != 0)) {
+  if (!(p->end_page_ptr != 0 || p->fc_curr != 0 || new_slab(id) != 0)) {
     /* We don't have more memory available */
     ret = NULL;
   } else if (p->fc_curr != 0) {
@@ -150,24 +150,24 @@ void* CMemPool::doSlabsAlloc(const size_t size) {
     return NULL;
   }
 
-  //record the point size,so we can locate it when doSlabsFree.
+  //record the point size,so we can locate it when do_slabs_free.
   *(unsigned int*) ret = size; //make sure it compatible on 32-bit and 64-bit machine
 
   return (char*) ret + psize;
 }
 
-void* CMemPool::memoryAllocate(size_t size) { //TODO
+void* CMemPool::allocate_memory(size_t size) { //TODO
   void *ret = malloc(size);
   return ret;
 }
 
-void CMemPool::doSlabsFree(void *ptr) { //because it used on a server,we need never really free.
+void CMemPool::do_slabs_free(void *ptr) { //because it used on a server,we need never really free.
   slabclass_t *p;
 
   const size_t size = *(unsigned int*) ((char*) ptr - psize);
   ; //get the real ptr size
 
-  unsigned int id = getSlabId(size);
+  unsigned int id = get_slab_id(size);
 
   assert(id >= POWER_SMALLEST && id <= power_largest);
   //abort
@@ -190,7 +190,7 @@ void CMemPool::doSlabsFree(void *ptr) { //because it used on a server,we need ne
   return;
 }
 
-void CMemPool::doStats() const {
+void CMemPool::do_stats() const {
   int total(0);
   for (int i = POWER_SMALLEST; i <= power_largest; i++) {
     const slabclass_t *p = &slabclass[i];
@@ -214,7 +214,7 @@ void CMemPool::doStats() const {
   printf("-------------------END----------------\r\n");
 }
 
-void CMemPool::getRatio() const {
+void CMemPool::get_ratio() const {
   unsigned int /*4 critical parammeters to measure the performance*/
   total_requested(0), //the real requested memory size
   total_used(0), //the size we alloced (total non-free chunks size)
@@ -232,7 +232,7 @@ void CMemPool::getRatio() const {
     }
   }
   total_malloced = mem_malloced;
-  rss = getRss();
+  rss = get_rss();
   if (rss == 0) {
     cout << "getRSS error" << endl;
     return;
@@ -248,7 +248,7 @@ void CMemPool::getRatio() const {
       << (float) total_malloced / rss << endl;
 }
 
-size_t CMemPool::getRss() const {
+size_t CMemPool::get_rss() const {
   int page = sysconf(_SC_PAGESIZE); //get page size
   //cout<<"page:"<<page<<endl;
   size_t rss;
@@ -288,25 +288,25 @@ size_t CMemPool::getRss() const {
 void* CMemPool::alloc(const size_t size) {
   void* ret;
   pthread_mutex_lock(&slabs_lock);
-  ret = doSlabsAlloc(size);
+  ret = do_slabs_alloc(size);
   pthread_mutex_unlock(&slabs_lock);
   return ret;
 }
 
 void CMemPool::free(void *ptr) {
   pthread_mutex_lock(&slabs_lock);
-  doSlabsFree(ptr);
+  do_slabs_free(ptr);
   pthread_mutex_unlock(&slabs_lock);
 }
 
 void CMemPool::stats() const {
   pthread_mutex_lock(&slabs_lock);
-  doStats();
+  do_stats();
   pthread_mutex_unlock(&slabs_lock);
 }
 
 void CMemPool::ratio() const {
   pthread_mutex_lock(&slabs_lock);
-  getRatio();
+  get_ratio();
   pthread_mutex_unlock(&slabs_lock);
 }

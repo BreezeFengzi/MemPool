@@ -9,7 +9,7 @@ struct tt {
 };
 
 int main() {
-  CMemPool* m = &CMemPool::Instance();
+  CMemPool* m = &CMemPool::get_instance();
 
   char a[] = "hello";
   char b[] = "world";
@@ -33,7 +33,7 @@ int main() {
   cout << "////" << endl;
   cout << p << endl << q << endl;
 
-  tt* t1 = (tt*) CMemPool::Instance().alloc(sizeof(tt) * 2); //16 bytes
+  tt* t1 = (tt*) CMemPool::get_instance().alloc(sizeof(tt) * 2); //16 bytes
   tt* t2 = (tt*) m->alloc(sizeof(tt) * 5); //40
   t1[0].i = 10;
   t1[0].j = 20;
@@ -46,7 +46,7 @@ int main() {
   m->stats();
   cout << "////" << endl;
 
-  CMemPool::Instance().ratio(); //nice way!
+  CMemPool::get_instance().ratio(); //nice way!
   return 0;
 
 }
