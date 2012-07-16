@@ -9,8 +9,9 @@ struct tt {
 };
 
 int main() {
+  
   CMemPool* m = &CMemPool::get_instance();
-
+  
   char a[] = "hello";
   char b[] = "world";
 
@@ -48,5 +49,4 @@ int main() {
 
   CMemPool::get_instance().ratio(); //nice way!
   return 0;
-
 }
